@@ -1,5 +1,7 @@
 const std = @import("std");
-const Range = @import("Range");
+const Range = @import("Range.zig");
+const Space = @import("Space.zig");
+
 const Self = @This();
 const MAX_INNER_NODES: comptime_int = 1000;
 const ROOT = 0;
@@ -8,6 +10,7 @@ inner_nodes: [MAX_INNER_NODES]Node = undefined,
 
 const Node = struct {
     leaf: bool,
+    space: Space,
     //dens_range: Range,
 };
 
@@ -34,9 +37,10 @@ pub fn newTestTree() Self {
     tree.newTestTreeInner(ROOT, 0);
     return tree;
 }
+
 pub fn newTestTreeInner(self: *Self, idx: u32, level: u32) void {
     const is_leaf = level >= 3;
-    self.inner_nodes[idx] = .{ .leaf = is_leaf };
+    self.inner_nodes[idx] = .{ .leaf = is_leaf, .space = Space.new(.{ 0, 3 }, .{ 0, 3 }, .{ 0, 3 }) };
     if (self.inner_nodes[idx].leaf) {
         return;
     }
