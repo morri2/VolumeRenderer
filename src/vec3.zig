@@ -42,6 +42,10 @@ pub fn Vec3(comptime T: type) type {
             return .{ .x = self.x - other.x, .y = self.y - other.y, .z = self.z - other.z };
         }
 
+        pub fn addSingle(self: Self, c: T) Self {
+            return .{ .x = self.x + c, .y = self.y + c, .z = self.z + c };
+        }
+
         pub fn mul(self: Self, other: Self) Self {
             return .{ .x = self.x * other.x, .y = self.y * other.y, .z = self.z * other.z };
         }
@@ -55,7 +59,7 @@ pub fn Vec3(comptime T: type) type {
 
         // OBS! will be sad if unsigned
         pub fn sign(self: Self) Self {
-            return self.gtz().add(self.gtz()).sub(Self.newSingle(T_ONE));
+            return self.gtz().scale(2.0).addSingle(-1.0);
         }
 
         pub fn dot(self: Self, other: Self) T {
