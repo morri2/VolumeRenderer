@@ -17,14 +17,14 @@ pub const Axis = enum {
 };
 
 normal_axis: Axis,
-normal_axis_value: f32,
+offset: f32,
 
 pub fn rayIntersect(self: Self, ray: Ray) f32 {
     const normal: Vec3 = self.normal_axis.baseVector();
     const denom: f32 = normal.dot(ray.dir);
-    if (denom > 0) {
-        const t: f32 = -(normal.scale(self.normal_axis_value).sub(ray.origin).dot(normal)) / denom;
-        if (t > 0) return t;
+    if (denom > 0.0) {
+        const t: f32 = -(normal.scale(self.offset).sub(ray.origin).dot(normal)) / denom;
+        if (t > 0.0) return t;
     }
     return -1;
 }

@@ -27,3 +27,7 @@ pub fn splitAt(self: Self, d: u32) .{ Self, Self } {
         Self.new(@max(self.max, self.min + d), self.max),
     };
 }
+
+pub fn len(self: Self) u32 {
+    return self.max - self.min;
+}
