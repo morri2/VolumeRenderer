@@ -3,7 +3,8 @@ const std = @import("std");
 const geo = @import("geo.zig");
 const zigimg = @import("zigimg");
 
-const ISOVAL = KDtree.ISOVAL;
+const SPACESIZE = @import("typedef.zig").SPACESIZE;
+const ISOVAL = @import("typedef.zig").ISOVAL;
 
 pub fn frame(src: geo.VecF, forw: geo.VecF, up: geo.VecF, x: u32, y: u32, pixel_size: f32, kdt: KDtree, isoval: ISOVAL) !void {
     const right = forw.cross(up);
@@ -11,13 +12,13 @@ pub fn frame(src: geo.VecF, forw: geo.VecF, up: geo.VecF, x: u32, y: u32, pixel_
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var img = try zigimg.Image.create(allocator, 256, 256, .grayscale8);
+    var img = try zigimg.Image.create(allocator, x, y, .grayscale8);
     defer img.deinit();
 
     for (0..y) |yi| {
-        const yf = @as(f32, @floatFromInt(yi - y / 2)) * pixel_size;
+        const yf = (@as(f32, @floatFromInt(y)) - @as(f32, @floatFromInt(yi / 2))) * pixel_size;
         for (0..x) |xi| {
-            const xf = @as(f32, @floatFromInt(xi - x / 2)) * pixel_size;
+            const xf = (@as(f32, @floatFromInt(x)) - @as(f32, @floatFromInt(xi / 2))) * pixel_size;
             const dir = forw.add(up.scale(yf).add(right.scale(xf))).norm();
             const res = traceRay(.{ .dir = dir, .origin = src }, &kdt, isoval);
 
@@ -32,41 +33,49 @@ pub fn frame(src: geo.VecF, forw: geo.VecF, up: geo.VecF, x: u32, y: u32, pixel_
 }
 
 pub fn traceRay(ray: geo.Ray, kdt: *const KDtree, isoval: ISOVAL) f32 {
-    const dir_off = ray.dir.gtz().cell();
+    const dir_off = ray.dir.gtz().cell().?;
 
     var t: f32 = 0.0;
-    var cell = ray.point(t).cell();
+
     var node_idx: u32 = KDtree.ROOT;
 
-    while (kdt.nodes[KDtree.ROOT].space.contains(cell)) {
+    t = 999999999.0;
+    const root_planes = kdt.nodes[node_idx].space.planes();
+    t = @min(t, root_planes[0].rayIntersect(ray));
+    t = @min(t, root_planes[1].rayIntersect(ray));
+    t = @min(t, root_planes[2].rayIntersect(ray));
+    t = @min(t, root_planes[3].rayIntersect(ray));
+    t = @min(t, root_planes[4].rayIntersect(ray));
+    t = @min(t, root_planes[5].rayIntersect(ray));
+    if (t < 0) t = 0.0;
 
+    while (kdt.nodes[KDtree.ROOT].space.containsFloat(ray.point(t))) {
+        const cell = ray.point(t).cell().?;
         // if ISO in range: ZOOM
         if (kdt.nodes[node_idx].dens_range.contains(isoval)) {
-            const maybe_node_idx = kdt.zoom(node_idx, cell);
-            if (maybe_node_idx == null) {
-                // AT LEAF
-                // THING DONE WE RETURN / interp
-                return t;
-            } else {
-                // ZOOM IN
-                node_idx = maybe_node_idx.?;
+            if (kdt.zoom(node_idx, cell)) |cell_node_idx| {
+                node_idx = cell_node_idx;
                 continue;
+            } else {
+                return t;
             }
         }
 
         const planes = kdt.nodes[node_idx].space.planes();
 
-        t = 999999999.0;
+        std.debug.print("t= {d} ", .{t});
 
-        t = @min(t, planes[0 + dir_off.x].rayIntersect(ray));
-        t = @min(t, planes[2 + dir_off.y].rayIntersect(ray));
-        t = @min(t, planes[4 + dir_off.z].rayIntersect(ray));
-        // t += 0.00001; // mini offset
+        t = 999999.0;
 
+        t = @min(t, planes[1 - dir_off.x].rayIntersect(ray));
+        t = @min(t, planes[3 - dir_off.y].rayIntersect(ray));
+        t = @min(t, planes[5 - dir_off.z].rayIntersect(ray));
+        t += 0.0001; // mini offset
+
+        std.debug.print(" -> t= {d} ({d} {d} {d})\n", .{ t, ray.point(t).x, ray.point(t).y, ray.point(t).z });
         // else Move ON
 
-        cell = ray.point(t).cell();
-        std.debug.assert(!kdt.nodes[node_idx].space.contains(cell));
+        std.debug.assert(!kdt.nodes[node_idx].space.containsFloat(ray.point(t)));
         while (!kdt.nodes[node_idx].space.contains(cell)) {
             if (node_idx == KDtree.ROOT) break;
             node_idx = KDtree.parent(node_idx);

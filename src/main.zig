@@ -17,18 +17,17 @@ pub fn main() !void {
     try renderSlice(data, 18);
 
     const kdt = KDtree.binaryPartionFromData(&data);
-    _ = kdt; // autofix
 
-    // try raytrace.frame(
-    //     geo.Vec3(f32).new(0, 0, 0),
-    //     geo.Vec3(f32).new(0, 0, 1.0),
-    //     geo.Vec3(f32).new(1.0, 0, 0),
-    //     100,
-    //     100,
-    //     0.1,
-    //     kdt,
-    //     98,
-    // );
+    try raytrace.frame(
+        geo.Vec3(f32).new(0.2, 0.2, 0.2),
+        geo.Vec3(f32).new(0, 0, 1.0),
+        geo.Vec3(f32).new(1.0, 0, 0),
+        100,
+        100,
+        0.01,
+        kdt,
+        98,
+    );
 }
 
 pub fn renderSlice(data: Data, x: u32) !void {

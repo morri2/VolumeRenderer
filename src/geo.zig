@@ -1,4 +1,7 @@
-pub const Cell: type = Vec3(u32);
+const SPACESIZE = @import("typedef.zig").SPACESIZE;
+const ISOVAL = @import("typedef.zig").ISOVAL;
+
+pub const Cell: type = Vec3(SPACESIZE);
 pub const VecF: type = Vec3(f32);
 const std = @import("std");
 pub const Axis = enum {
@@ -44,7 +47,8 @@ pub fn Vec3(comptime T: type) type {
             return single(0.0);
         }
 
-        pub fn cell(self: Self) Cell {
+        pub fn cell(self: Self) ?Cell {
+            if (self.x < 0 or self.y < 0 or self.z < 0) return null;
             switch (@typeInfo(T)) {
                 .Float => return Cell.new(
                     @intFromFloat(self.x),
@@ -175,6 +179,17 @@ pub fn Volume(comptime T: type) type {
 
         pub fn contains(self: Self, coord: Vec3(T)) bool {
             return self.xrange.contains(coord.x) and self.yrange.contains(coord.y) and self.zrange.contains(coord.z);
+        }
+
+        pub fn containsFloat(
+            self: Self,
+            fcoord: Vec3(f32),
+        ) bool {
+            if (@typeInfo(T) != .Int) std.debug.print("DONT USE THIS FOR f32 VOLUMES!", .{});
+            if (fcoord.cell()) |coord| {
+                return self.xrange.contains(coord.x) and self.yrange.contains(coord.y) and self.zrange.contains(coord.z);
+            }
+            return false;
         }
 
         pub fn splitMiddle(self: Self, normal_axis: Axis) [2]Self {
@@ -350,6 +365,24 @@ pub fn Plane(comptime T: type) type {
                 if (t > 0.0) return t;
             }
             return -1;
+        }
+
+        pub fn firstIntersect(self: Self, ray: Ray, prev_t: f32) f32 {
+            const normal: Vec3(f32) = self.normal_axis.baseVector(f32);
+            const denom: f32 = normal.dot(ray.dir);
+            if (denom > 0.0) {
+                var offset: f32 = 0;
+
+                switch (@typeInfo(T)) {
+                    .Float => offset = @floatCast(self.offset),
+                    .Int => offset = @floatFromInt(self.offset),
+                    else => unreachable,
+                }
+
+                const t: f32 = -(normal.scale(offset).sub(ray.origin).dot(normal)) / denom;
+                if (t > 0.0) return @min(t, prev_t);
+            }
+            return prev_t;
         }
     };
 }

@@ -7,10 +7,10 @@ const Self = @This();
 const MAX_INNER_NODES: comptime_int = 425540;
 pub const ROOT = 0;
 
-nodes: [MAX_INNER_NODES]Node = undefined,
+const SPACESIZE = @import("typedef.zig").SPACESIZE;
+const ISOVAL = @import("typedef.zig").ISOVAL;
 
-pub const SPACESIZE: type = u8;
-pub const ISOVAL: type = u8;
+nodes: [MAX_INNER_NODES]Node = undefined,
 
 const Node = packed struct {
     leaf: bool,
