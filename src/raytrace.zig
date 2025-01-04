@@ -1,20 +1,11 @@
 const KDtree = @import("KDtree.zig");
-const Space = @import("Space.zig");
-const Point = Space.Point;
-const Coord = Space.Coord;
 const std = @import("std");
+const geo = @import("geo.zig");
 const zigimg = @import("zigimg");
 
-pub const Ray = struct {
-    origin: Point,
-    dir: Point,
+const ISOVAL = KDtree.ISOVAL;
 
-    pub fn point(self: @This(), t: f32) Point {
-        return self.origin.add(self.dir.scale(t));
-    }
-};
-
-pub fn frame(src: Point, forw: Point, up: Point, x: u32, y: u32, pixel_size: f32, kdt: KDtree, isoval: u32) void {
+pub fn frame(src: geo.VecF, forw: geo.VecF, up: geo.VecF, x: u32, y: u32, pixel_size: f32, kdt: KDtree, isoval: ISOVAL) !void {
     const right = forw.cross(up);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -28,31 +19,31 @@ pub fn frame(src: Point, forw: Point, up: Point, x: u32, y: u32, pixel_size: f32
         for (0..x) |xi| {
             const xf = @as(f32, @floatFromInt(xi - x / 2)) * pixel_size;
             const dir = forw.add(up.scale(yf).add(right.scale(xf))).norm();
-            const res = traceRay(.{ .dir = dir, .origin = src }, kdt, isoval);
+            const res = traceRay(.{ .dir = dir, .origin = src }, &kdt, isoval);
 
             if (res > 0.0) {
-                img.pixels.grayscale8[yi * x + x] = zigimg.color.Grayscale8(255);
+                img.pixels.grayscale8[yi * x + x] = zigimg.color.Grayscale8{ .value = 255 };
             } else {
-                img.pixels.grayscale8[yi * x + x] = zigimg.color.Grayscale8(0);
+                img.pixels.grayscale8[yi * x + x] = zigimg.color.Grayscale8{ .value = 0 };
             }
         }
     }
     try img.writeToFilePath("out.png", .{ .png = .{} });
 }
 
-pub fn traceRay(ray: Ray, kdt: KDtree, isoval: u32) f32 {
+pub fn traceRay(ray: geo.Ray, kdt: *const KDtree, isoval: ISOVAL) f32 {
     const dir_off = ray.dir.gtz().cell();
 
-    var t = 0.0;
+    var t: f32 = 0.0;
     var cell = ray.point(t).cell();
-    var node_idx = KDtree.ROOT;
+    var node_idx: u32 = KDtree.ROOT;
 
     while (kdt.nodes[KDtree.ROOT].space.contains(cell)) {
 
         // if ISO in range: ZOOM
         if (kdt.nodes[node_idx].dens_range.contains(isoval)) {
-            const maybe_node_idx = kdt.zoom(node_idx, kdt.nodes[node_idx]);
-            if (!maybe_node_idx) {
+            const maybe_node_idx = kdt.zoom(node_idx, cell);
+            if (maybe_node_idx == null) {
                 // AT LEAF
                 // THING DONE WE RETURN / interp
                 return t;

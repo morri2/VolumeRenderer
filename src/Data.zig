@@ -6,7 +6,7 @@ data: []u8,
 
 /// function for format from ucd https://web.cs.ucdavis.edu/~okreylos/PhDStudies/Spring2000/ECS277/DataSets.html
 pub fn loadUCD() !@This() {
-    var file = try std.fs.cwd().openFile("Skull.vol", .{});
+    var file = try std.fs.cwd().openFile("C60.vol", .{});
     defer file.close();
 
     var reader = file.reader();
@@ -32,6 +32,38 @@ pub fn loadUCD() !@This() {
         }
     }
     return new;
+}
+
+/// function for format from ucd https://web.cs.ucdavis.edu/~okreylos/PhDStudies/Spring2000/ECS277/DataSets.html
+pub fn loadUCDcapped(maxdim: u32) !@This() {
+    var file = try std.fs.cwd().openFile("C60.vol", .{});
+    defer file.close();
+
+    var reader = file.reader();
+
+    const xdim = reader.readInt(u32, .big) catch unreachable;
+    const ydim = reader.readInt(u32, .big) catch unreachable;
+    const zdim = reader.readInt(u32, .big) catch unreachable;
+
+    // unused
+    _ = reader.readInt(u32, .big) catch unreachable;
+
+    // true size
+    _ = reader.readInt(u32, .big) catch unreachable;
+    _ = reader.readInt(u32, .big) catch unreachable;
+    _ = reader.readInt(u32, .big) catch unreachable;
+
+    var out = init(@min(maxdim, xdim), @min(maxdim, ydim), @min(maxdim, zdim)) catch unreachable;
+    for (0..xdim) |x| {
+        for (0..ydim) |y| {
+            for (0..zdim) |z| {
+                const v = reader.readByte() catch unreachable;
+                if (x >= maxdim or y >= maxdim or z >= maxdim) continue;
+                out.set(v, @intCast(x), @intCast(y), @intCast(z));
+            }
+        }
+    }
+    return out;
 }
 
 pub fn init(xdim: u32, ydim: u32, zdim: u32) !@This() {

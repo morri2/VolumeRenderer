@@ -1,22 +1,24 @@
 const std = @import("std");
-const Range = @import("Range.zig");
-const Space = @import("Space.zig");
-const Cell = Space.Cell;
+
+const geo = @import("geo.zig");
 const Data = @import("Data.zig");
 
 const Self = @This();
-const MAX_INNER_NODES: comptime_int = 1000;
+const MAX_INNER_NODES: comptime_int = 425540;
 pub const ROOT = 0;
 
 nodes: [MAX_INNER_NODES]Node = undefined,
 
-const Node = struct {
+pub const SPACESIZE: type = u8;
+pub const ISOVAL: type = u8;
+
+const Node = packed struct {
     leaf: bool,
-    space: Space,
-    dens_range: Range,
+    space: geo.Volume(SPACESIZE),
+    dens_range: geo.Range(u8),
 };
 
-pub fn zoom(self: Self, idx: u32, cell: Cell) ?u32 {
+pub fn zoom(self: Self, idx: u32, cell: geo.Cell) ?u32 {
     if (self.nodes[idx].leaf) return null;
     if (self.nodes[left(idx)].space.contains(cell)) {
         return left(idx);
@@ -28,56 +30,73 @@ pub fn zoom(self: Self, idx: u32, cell: Cell) ?u32 {
 // ////////// //
 // INDEX MATH //
 // ////////// //
-fn left(i: u32) u32 {
+pub fn left(i: u32) u32 {
     return 2 * i + 1;
 }
 
-fn right(i: u32) u32 {
+pub fn right(i: u32) u32 {
     return 2 * i + 2;
 }
 
-fn parent(i: u32) u32 {
+pub fn parent(i: u32) u32 {
     return (i - 1) / 2;
 }
 
-// pub fn binaryPartionFromData(data: Data) void {
-//     _ = data; // autofix
-//     var tree: Self = .{};
+pub fn binaryPartionFromData(data: *Data) Self {
+    var tree: Self = .{};
+    binaryPartionFromDataInner(&tree, 0, data, geo.Volume(SPACESIZE).new(
+        .{ 0, @intCast(data.resulution[0]) },
+        .{ 0, @intCast(data.resulution[1]) },
+        .{ 0, @intCast(data.resulution[2]) },
+    ), 0);
+    return tree;
+}
 
-//     _ = tree; // autofix
+pub fn binaryPartionFromDataInner(self: *Self, idx: u32, data: *Data, space: geo.Volume(SPACESIZE), layer: u8) void {
+    const is_leaf = space.size() <= 1;
 
-// }
+    //std.debug.print("new node with dims: {} {} {}\n", .{ space.xrange.len(), space.yrange.len(), space.zrange.len() });
 
-// pub fn binaryPartionFromDataInner(self: *Self, data: Data, idx: u32, space: Space) void {
-//     const is_leaf = space.size() == 1;
-//     self.nodes[idx] = .{ .leaf = is_leaf, .space = Space.new(.{ 0, 3 }, .{ 0, 3 }, .{ 0, 3 }), .dens_range = Range.new(0, 0) };
-//     if (self.nodes[idx].leaf) {
-//         return;
-//     }
+    self.nodes[idx] = .{
+        .leaf = is_leaf,
+        .space = space,
+        .dens_range = geo.Range(ISOVAL).new(0, 9),
+    };
 
-//     self.newTestTreeInner(left(idx), level + 1);
-//     self.newTestTreeInner(right(idx), level + 1);
-// }
+    if (is_leaf) return;
+
+    const subspace = space.splitMiddle(space.largestDim());
+
+    if (space.size() <= subspace[0].size()) std.debug.print("WAAAA!!!!!!\n\n", .{});
+    if (space.size() <= subspace[1].size()) std.debug.print("WAAAA!!!!!!!!!!!!\n\n", .{});
+
+    binaryPartionFromDataInner(self, left(idx), data, subspace[0], layer + 1);
+    binaryPartionFromDataInner(self, right(idx), data, subspace[1], layer + 1);
+}
 
 // ///////////////// //
 // STUFF FOR TESTING //
 // ///////////////// //
 
-pub fn newTestTree() Self {
-    var tree: Self = .{};
-    tree.newTestTreeInner(ROOT, 0);
-    return tree;
-}
+// pub fn newTestTree() Self {
+//     var tree: Self = .{};
+//     tree.newTestTreeInner(ROOT, 0);
+//     return tree;
+// }
 
-pub fn newTestTreeInner(self: *Self, idx: u32, level: u32) void {
-    const is_leaf = level >= 3;
-    self.nodes[idx] = .{ .leaf = is_leaf, .space = Space.new(.{ 0, 3 }, .{ 0, 3 }, .{ 0, 3 }), .dens_range = Range.new(0, 0) };
-    if (self.nodes[idx].leaf) {
-        return;
-    }
-    self.newTestTreeInner(left(idx), level + 1);
-    self.newTestTreeInner(right(idx), level + 1);
-}
+// pub fn newTestTreeInner(self: *Self, idx: u32, level: u32) void {
+//     const is_leaf = level >= 3;
+//     self.nodes[idx] = .{
+//         .leaf = is_leaf,
+//         .space = .{.xrange = , .{ 0, 3 }, .{ 0, 3 }),
+//         .dens_range = geo.Range(u8).new(0, 0),
+//     };
+//     if (self.nodes[idx].leaf) {
+//         return;
+//     }
+//     self.newTestTreeInner(left(idx), level + 1);
+//     self.newTestTreeInner(right(idx), level + 1);
+// }
 
 pub fn printTree(self: Self) void {
     self.printTreeInner(ROOT, 0);

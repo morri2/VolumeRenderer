@@ -28,3 +28,20 @@ pub fn rayIntersect(self: Self, ray: Ray) f32 {
     }
     return -1;
 }
+
+pub fn Plane(comptime T: type) type {
+    return struct {
+        normal_axis: Axis,
+        offset: T,
+
+        pub fn rayIntersect(self: Self, ray: Ray) ?f32 {
+            const normal: Vec3 = self.normal_axis.baseVector();
+            const denom: f32 = normal.dot(ray.dir);
+            if (denom > 0.0) {
+                const t: f32 = -(normal.scale(self.offset).sub(ray.origin).dot(normal)) / denom;
+                if (t > 0.0) return t;
+            }
+            return -1;
+        }
+    };
+}
