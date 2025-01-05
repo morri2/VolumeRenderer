@@ -9,8 +9,9 @@ pub fn main() !void {
     //const tree = KDtree.newTestTree();
     //_ = tree; // autofix
     //tree.printTree();
+    std.debug.print("", .{});
 
-    std.debug.print("\n\n", .{});
+    std.debug.print("hello\n\n", .{});
 
     var data = try Data.loadUCDcapped(32);
     data = data; // autofix

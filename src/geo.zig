@@ -65,16 +65,20 @@ pub fn Vec3(comptime T: type) type {
         pub fn cell(self: Self) ?Cell {
             if (self.x < 0 or self.y < 0 or self.z < 0) return null;
             switch (@typeInfo(T)) {
-                .Float => return Cell.new(
-                    @intFromFloat(self.x),
-                    @intFromFloat(self.y),
-                    @intFromFloat(self.z),
-                ),
-                .Int => return Cell.new(
-                    @intCast(self.x),
-                    @intCast(self.y),
-                    @intCast(self.z),
-                ),
+                .Float => return .{
+                    .vec = Vec3(u8).new(
+                        @intFromFloat(self.x),
+                        @intFromFloat(self.y),
+                        @intFromFloat(self.z),
+                    ),
+                },
+                .Int => return .{
+                    .vec = Vec3(u8).new(
+                        @intCast(self.x),
+                        @intCast(self.y),
+                        @intCast(self.z),
+                    ),
+                },
                 else => unreachable,
             }
         }
@@ -206,7 +210,7 @@ pub fn Volume(comptime T: type) type {
         ) bool {
             if (@typeInfo(T) != .Int) std.debug.print("DONT USE THIS FOR f32 VOLUMES!", .{});
             if (fcoord.cell()) |coord| {
-                return self.xrange.contains(coord.x) and self.yrange.contains(coord.y) and self.zrange.contains(coord.z);
+                return self.xrange.contains(coord.vec.x) and self.yrange.contains(coord.vec.y) and self.zrange.contains(coord.vec.z);
             }
             return false;
         }

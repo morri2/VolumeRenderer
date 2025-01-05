@@ -52,7 +52,7 @@ pub const SpaceTracker = struct {
     pub fn new(kdt: *const Self) @This() {
         return .{
             .kdt = kdt,
-            .node_space = geo.Volume().new(
+            .node_space = geo.Volume(SPACESIZE).new(
                 .{ 0, kdt.root_dim[0] },
                 .{ 0, kdt.root_dim[1] },
                 .{ 0, kdt.root_dim[2] },
@@ -70,6 +70,7 @@ pub const SpaceTracker = struct {
 
         out.layer += 1;
         out.next_split_axis = self.next_split_axis.next();
+        return out;
     }
 
     pub fn rightHalf(self: @This()) @This() {
@@ -86,19 +87,20 @@ pub const SpaceTracker = struct {
     }
 
     pub fn zoom(self: *@This(), cell: geo.Cell) void {
+        const split_space = self.node_space.splitGlobal(self.next_split_axis, self.kdt.nodes[self.node_idx].partition);
         if (cell.arr[self.next_split_axis.idx()] < self.kdt.nodes[self.node_idx].partition) {
-            self.node_space = self.node_space.splitInternal()[0];
+            self.node_space = split_space[1];
             self.node_idx = left(self.node_idx);
         } else {
-            self.node_space = self.node_space.splitInternal()[1];
+            self.node_space = split_space[1];
             self.node_idx = right(self.node_idx);
         }
         self.layer += 1;
         self.next_split_axis = self.next_split_axis.next();
     }
 
-    pub fn reset(self: @This()) void {
-        self.node_space = geo.Volume().new(
+    pub fn reset(self: *@This()) void {
+        self.node_space = geo.Volume(SPACESIZE).new(
             .{ 0, self.kdt.root_dim[0] },
             .{ 0, self.kdt.root_dim[1] },
             .{ 0, self.kdt.root_dim[2] },
@@ -131,9 +133,9 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL) bool {
         const planes = st.node_space.planes();
         t = std.math.inf(f32);
 
-        t = @min(t, planes[0 + do.x].rayIntersect(ray));
-        t = @min(t, planes[2 + do.y].rayIntersect(ray));
-        t = @min(t, planes[4 + do.z].rayIntersect(ray));
+        t = @min(t, planes[0 + do.vec.x].rayIntersect(ray));
+        t = @min(t, planes[2 + do.vec.y].rayIntersect(ray));
+        t = @min(t, planes[4 + do.vec.z].rayIntersect(ray));
         t += 0.00001; // mini offset
 
         std.debug.assert(!st.node_space.containsFloat(ray.point(t))); // we must have moved outside the thing, otherwise bad...
@@ -158,7 +160,7 @@ pub fn newEvenPartition(data: *Data) Self {
         ),
         .nodes = undefined,
     };
-    const st = SpaceTracker.new(kdt);
+    const st = SpaceTracker.new(&kdt);
 
     newEvenPartitionInner(&kdt, data, st);
 
@@ -166,11 +168,12 @@ pub fn newEvenPartition(data: *Data) Self {
 }
 
 pub fn newEvenPartitionInner(kdt: *Self, data: *Data, st: SpaceTracker) void {
-    var min_d = std.math.maxInt(ISOVAL);
-    var max_d = 0;
+    var min_d: ISOVAL = std.math.maxInt(ISOVAL);
+    var max_d: ISOVAL = 0;
 
     var iter = st.node_space.initIterator();
-    while (iter.next()) |v| {
+    while (iter.next()) |s| {
+        const v = data.get(s.x, s.y, s.z);
         min_d = @min(min_d, v);
         max_d = @max(max_d, v);
     }
