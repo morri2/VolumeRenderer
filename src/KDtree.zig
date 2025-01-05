@@ -63,6 +63,14 @@ pub fn binaryPartionFromDataInner(self: *Self, idx: u32, data: *Data, space: geo
         .dens_range = geo.Range(ISOVAL).new(0, 9),
     };
 
+    var iter = space.initIterator();
+
+    while (iter.next()) |cell| {
+        const val = data.get(cell.x, cell.y, cell.z);
+        self.nodes[idx].dens_range.max = @max(self.nodes[idx].dens_range.max, val);
+        self.nodes[idx].dens_range.min = @min(self.nodes[idx].dens_range.min, val);
+    }
+
     if (is_leaf) return;
 
     const subspace = space.splitMiddle(space.largestDim());

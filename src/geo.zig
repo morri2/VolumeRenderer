@@ -1,7 +1,10 @@
 const SPACESIZE = @import("typedef.zig").SPACESIZE;
 const ISOVAL = @import("typedef.zig").ISOVAL;
 
-pub const Cell: type = Vec3(SPACESIZE);
+pub const Cell: type = union {
+    vec: Vec3(SPACESIZE),
+    arr: [3]SPACESIZE,
+};
 pub const VecF: type = Vec3(f32);
 const std = @import("std");
 pub const Axis = enum {
@@ -15,6 +18,18 @@ pub const Axis = enum {
             .X => return Vec3(T).new(1, 0, 0),
             .Y => return Vec3(T).new(0, 1, 0),
             .Z => return Vec3(T).new(0, 0, 1),
+        }
+    }
+
+    pub fn idx(self: Self) usize {
+        return @intFromEnum(self);
+    }
+
+    pub fn next(self: Self) Self {
+        switch (self) {
+            .X => return .Y,
+            .Y => return .Z,
+            .Z => return .X,
         }
     }
 };
@@ -121,6 +136,10 @@ pub fn Vec3(comptime T: type) type {
                 else => unreachable,
             }
         }
+
+        pub fn print(self: Self) void {
+            std.debug.print("<{d},{d},{d}>", .{ self.x, self.y, self.z });
+        }
     };
 }
 
@@ -220,6 +239,27 @@ pub fn Volume(comptime T: type) type {
             return .{ a, b };
         }
 
+        pub fn splitGlobal(self: Self, normal_axis: Axis, split: T) [2]Self {
+            var a = self;
+            var b = self;
+
+            switch (normal_axis) {
+                .X => {
+                    a.xrange.max = @min(a.xrange.max, split);
+                    b.xrange.min = @max(b.xrange.min, split);
+                },
+                .Y => {
+                    a.yrange.max = @min(a.yrange.max, split);
+                    b.yrange.min = @max(b.yrange.min, split);
+                },
+                .Z => {
+                    a.zrange.max = @min(a.zrange.max, split);
+                    b.zrange.min = @max(b.zrange.min, split);
+                },
+            }
+            return .{ a, b };
+        }
+
         pub fn getAxisRange(self: Self, axis: Axis) Range(T) {
             switch (axis) {
                 .X => return self.xrange,
@@ -282,23 +322,24 @@ pub fn Volume(comptime T: type) type {
 
             pub fn next(self: *@This()) ?Vec3(T) {
                 if (@typeInfo(T) != .Int) unreachable; // iterators not supported for non int space
-                if (!self.next_cell) return null;
-
-                const out = self.next_cell;
-
-                self.next_cell.x += 1;
-                if (self.volume.contains(self.next_cell)) {
-                    self.next_cell.x = self.volume.xrange.min;
-                    self.next_cell.y += 1;
-                    if (self.volume.contains(self.next_cell)) {
-                        self.next_cell.y = self.volume.yrange.min;
-                        self.next_cell.z += 1;
-                        if (self.volume.contains(self.next_cell)) {
-                            self.next_cell = null;
+                if (self.next_cell) |cell| {
+                    self.next_cell.?.x += 1;
+                    if (!self.volume.contains(self.next_cell.?)) {
+                        self.next_cell.?.x = self.volume.xrange.min;
+                        self.next_cell.?.y += 1;
+                        if (!self.volume.contains(self.next_cell.?)) {
+                            self.next_cell.?.y = self.volume.yrange.min;
+                            self.next_cell.?.z += 1;
+                            if (!self.volume.contains(self.next_cell.?)) {
+                                self.next_cell = null;
+                            }
                         }
                     }
+
+                    return cell;
+                } else {
+                    return null;
                 }
-                return out;
             }
         };
 
@@ -351,19 +392,23 @@ pub fn Plane(comptime T: type) type {
 
         pub fn rayIntersect(self: Self, ray: Ray) f32 {
             const normal: Vec3(f32) = self.normal_axis.baseVector(f32);
+            const center: Vec3(f32) = normal.scale(@floatFromInt(self.offset));
+            //std.debug.print("normal: ", .{});
+            //normal.print();
+
+            //std.debug.print("  center: ", .{});
+            //center.print();
             const denom: f32 = normal.dot(ray.dir);
-            if (denom > 0.0) {
-                var offset: f32 = 0;
+            //std.debug.print("\n  denom: {d}", .{denom});
 
-                switch (@typeInfo(T)) {
-                    .Float => offset = @floatCast(self.offset),
-                    .Int => offset = @floatFromInt(self.offset),
-                    else => unreachable,
-                }
+            if (@abs(denom) < 1e-8) return std.math.inf(f32);
 
-                const t: f32 = -(normal.scale(offset).sub(ray.origin).dot(normal)) / denom;
-                if (t > 0.0) return t;
-            }
+            const t: f32 = ((center.sub(ray.origin)).dot(normal)) / denom;
+            //std.debug.print("\n  t?: {d}  \n", .{t});
+
+            //const t: f32 = -(normal.scale(offset).sub(ray.origin).dot(normal)) / denom;
+            if (t > 0.0) return t;
+
             return -1;
         }
 
