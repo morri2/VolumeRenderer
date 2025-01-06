@@ -13,7 +13,8 @@ pub const SlimNode = packed struct {
 
 root_dim: [3]SPACESIZE,
 root_space: geo.Volume(SPACESIZE),
-nodes: [256 * 256 * 256]SlimNode,
+nodes: []SlimNode,
+allocator: std.mem.Allocator,
 
 // ////////// //
 // INDEX MATH //
@@ -89,7 +90,7 @@ pub const SpaceTracker = struct {
     pub fn zoom(self: *@This(), cell: geo.Cell) void {
         const split_space = self.node_space.splitGlobal(self.next_split_axis, self.kdt.nodes[self.node_idx].partition);
         if (cell.arr[self.next_split_axis.idx()] < self.kdt.nodes[self.node_idx].partition) {
-            self.node_space = split_space[1];
+            self.node_space = split_space[0];
             self.node_idx = left(self.node_idx);
         } else {
             self.node_space = split_space[1];
@@ -112,42 +113,136 @@ pub const SpaceTracker = struct {
     }
 };
 
-pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL) bool {
+pub const RayRes = struct {
+    t: f32 = 0,
+    hit: bool = false,
+    oob: bool = false,
+    t_vol_enter: f32 = 0,
+};
+
+pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bool) RayRes {
     var t: f32 = 0.0;
     var st = SpaceTracker.new(kdt);
 
     const do = ray.dir.gtz().cell().?; // to keep track of which planes we need to intersect with
 
+    // SHMOOVE US INTO THE SPACE
+    const outer_planes = st.node_space.planes();
+    t = @max(t, outer_planes[1 - do.x()].rayIntersect(ray));
+    t = @max(t, outer_planes[3 - do.y()].rayIntersect(ray));
+    t = @max(t, outer_planes[5 - do.z()].rayIntersect(ray));
+    t += 0.00001; // mini offset
+
+    const t_vol_enter = t;
+    _ = t_vol_enter; // autofix
+
+    if (comptime dbp)
+        std.debug.print(
+            \\ 
+            \\
+            \\ ### NEW RAY ### 
+            \\d= ({d:.2} {d:.2} {d:.2})  o= ({d:.2} {d:.2} {d:.2})
+            \\skip to ({d:.2} {d:.2} {d:.2}) t={d:.3}
+            \\
+        , .{
+            ray.dir.x,      ray.dir.y,      ray.dir.z,
+            ray.origin.x,   ray.origin.y,   ray.origin.z,
+            ray.point(t).x, ray.point(t).y, ray.point(t).z,
+            t,
+        });
+
+    if (!st.node_space.containsFloat(ray.point(t))) {
+        if (comptime dbp) std.debug.print(
+            \\
+            \\ oob
+            \\ 
+            \\
+        , .{});
+        return .{ .oob = true };
+    }
+
+    var cell = ray.point(t).cell().?;
+
     while (st.node_space.containsFloat(ray.point(t))) {
+        if (comptime dbp)
+            std.debug.print(
+                \\ 
+                \\t={d:.3}  r=({d:.2} {d:.2} {d:.2})
+                \\node={}   size={}   iso=[{}-{}] v {}
+                \\  res: 
+            , .{
+                t,           ray.point(t).x,       ray.point(t).y,                           ray.point(t).z,
+                st.node_idx, st.node_space.size(), kdt.nodes[st.node_idx].density_range.min, kdt.nodes[st.node_idx].density_range.max,
+                isoval,
+            });
+
         // ZOOM if isovalue is in range
-        if (kdt.nodes[st.node_idx].density_range.contains(isoval)) {
-            if (st.node_space.size() == 0) {
-                return true; // We have found a leaf node with relevant iso_value
+        if (kdt.nodes[st.node_idx].density_range.containsInclusive(isoval)) {
+            if (st.node_space.size() == 1) {
+                if (comptime dbp)
+                    std.debug.print("HIT!\n", .{});
+                return .{
+                    .t = t,
+                    .hit = true,
+                }; // We have found a leaf node with relevant iso_value
             } else {
-                st.zoom(ray.point(t).cell().?);
+                if (comptime dbp)
+                    std.debug.print("ZOOM!\n", .{});
+                st.zoom(cell);
                 continue; // ZOOM in
             }
         }
 
         // MOVE if
+        if (comptime dbp)
+            std.debug.print("MOVE!\n", .{});
         const planes = st.node_space.planes();
         t = std.math.inf(f32);
 
-        t = @min(t, planes[0 + do.vec.x].rayIntersect(ray));
-        t = @min(t, planes[2 + do.vec.y].rayIntersect(ray));
-        t = @min(t, planes[4 + do.vec.z].rayIntersect(ray));
-        t += 0.00001; // mini offset
+        t = @min(t, planes[0 + do.x()].rayIntersect(ray));
+        t = @min(t, planes[2 + do.y()].rayIntersect(ray));
+        t = @min(t, planes[4 + do.z()].rayIntersect(ray));
+        t += 0.0001; // mini offset
+
+        if (comptime dbp)
+            if (st.node_space.containsFloat(ray.point(t))) {
+                std.debug.print(
+                    \\
+                    \\VOLUME NOT ESQd!!!
+                    \\x: {} {}
+                    \\y: {} {}
+                    \\z: {} {}
+                    \\
+                    \\
+                , .{
+                    st.node_space.xrange.min,
+                    st.node_space.xrange.max,
+                    st.node_space.yrange.min,
+                    st.node_space.yrange.max,
+                    st.node_space.zrange.min,
+                    st.node_space.zrange.max,
+                });
+                std.debug.print("previous node not escaped!\n t={d} ({d} {d} {d})\n", .{
+                    t,
+                    ray.point(t).x,
+                    ray.point(t).y,
+                    ray.point(t).z,
+                });
+            };
 
         std.debug.assert(!st.node_space.containsFloat(ray.point(t))); // we must have moved outside the thing, otherwise bad...
+        cell = ray.point(t).cell().?;
         st.reset(); // return to root
     }
-    return false;
+    return .{
+        .t = t,
+        .hit = false,
+    };
 }
 
 /////// BUILD A TREE
-
-pub fn newEvenPartition(data: *Data) Self {
-    var kdt: Self = .{
+pub fn init(data: *Data, allocator: std.mem.Allocator) Self {
+    const kdt: Self = .{
         .root_dim = .{
             @intCast(data.resulution[0]),
             @intCast(data.resulution[1]),
@@ -158,12 +253,21 @@ pub fn newEvenPartition(data: *Data) Self {
             .{ 0, @intCast(data.resulution[1]) },
             .{ 0, @intCast(data.resulution[2]) },
         ),
-        .nodes = undefined,
+        .nodes = allocator.alloc(SlimNode, data.size() * 10) catch unreachable,
+        .allocator = allocator,
     };
+    return kdt;
+}
+
+pub fn newEvenPartition(data: *Data) Self {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var kdt: Self = init(data, gpa.allocator());
     const st = SpaceTracker.new(&kdt);
 
-    newEvenPartitionInner(&kdt, data, st);
+    std.debug.print("Building new tree: {d} nodes len\n", .{kdt.nodes.len});
 
+    newEvenPartitionInner(&kdt, data, st);
+    std.debug.print("Building new tree: {d} nodes len\n", .{kdt.nodes.len});
     return kdt;
 }
 
@@ -171,15 +275,21 @@ pub fn newEvenPartitionInner(kdt: *Self, data: *Data, st: SpaceTracker) void {
     var min_d: ISOVAL = std.math.maxInt(ISOVAL);
     var max_d: ISOVAL = 0;
 
+    if (st.node_space.size() < 1) {
+        return;
+    }
+
     var iter = st.node_space.initIterator();
     while (iter.next()) |s| {
-        const v = data.get(s.x, s.y, s.z);
+        const v = data.get(s.x(), s.y(), s.z());
         min_d = @min(min_d, v);
         max_d = @max(max_d, v);
     }
 
-    const partition = (st.node_space.getAxisRange(st.next_split_axis).min + st.node_space.getAxisRange(st.next_split_axis).max) / 2;
-
+    const partition: u8 = @intCast(( //
+        @as(u32, @intCast(st.node_space.getAxisRange(st.next_split_axis).min)) + //
+        @as(u32, @intCast(st.node_space.getAxisRange(st.next_split_axis).max))) / 2);
+    //std.debug.print("\nspace {} \n", .{st.node_space.size()});
     kdt.nodes[st.node_idx] = .{
         .partition = partition,
         .density_range = geo.Range(ISOVAL).new(
@@ -187,6 +297,10 @@ pub fn newEvenPartitionInner(kdt: *Self, data: *Data, st: SpaceTracker) void {
             max_d,
         ),
     };
+
+    if (st.node_space.size() == 1) {
+        return;
+    }
 
     newEvenPartitionInner(kdt, data, st.leftHalf());
     newEvenPartitionInner(kdt, data, st.rightHalf());

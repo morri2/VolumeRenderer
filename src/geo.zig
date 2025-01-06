@@ -1,10 +1,6 @@
 const SPACESIZE = @import("typedef.zig").SPACESIZE;
 const ISOVAL = @import("typedef.zig").ISOVAL;
 
-pub const Cell: type = union {
-    vec: Vec3(SPACESIZE),
-    arr: [3]SPACESIZE,
-};
 pub const VecF: type = Vec3(f32);
 const std = @import("std");
 pub const Axis = enum {
@@ -43,6 +39,19 @@ pub const Ray = struct {
     }
 };
 
+pub const Cell = struct {
+    arr: [3]SPACESIZE,
+    pub fn x(self: @This()) SPACESIZE {
+        return self.arr[0];
+    }
+    pub fn y(self: @This()) SPACESIZE {
+        return self.arr[1];
+    }
+    pub fn z(self: @This()) SPACESIZE {
+        return self.arr[2];
+    }
+};
+
 pub fn Vec3(comptime T: type) type {
     return packed struct {
         const Self = @This();
@@ -65,20 +74,16 @@ pub fn Vec3(comptime T: type) type {
         pub fn cell(self: Self) ?Cell {
             if (self.x < 0 or self.y < 0 or self.z < 0) return null;
             switch (@typeInfo(T)) {
-                .Float => return .{
-                    .vec = Vec3(u8).new(
-                        @intFromFloat(self.x),
-                        @intFromFloat(self.y),
-                        @intFromFloat(self.z),
-                    ),
-                },
-                .Int => return .{
-                    .vec = Vec3(u8).new(
-                        @intCast(self.x),
-                        @intCast(self.y),
-                        @intCast(self.z),
-                    ),
-                },
+                .Float => return .{ .arr = .{
+                    @intFromFloat(self.x),
+                    @intFromFloat(self.y),
+                    @intFromFloat(self.z),
+                } },
+                .Int => return .{ .arr = .{
+                    @intCast(self.x),
+                    @intCast(self.y),
+                    @intCast(self.z),
+                } },
                 else => unreachable,
             }
         }
@@ -104,7 +109,7 @@ pub fn Vec3(comptime T: type) type {
         }
 
         pub fn len(self: Self) T {
-            return @sqrt(self.x + self.y + self.z);
+            return @sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
         }
 
         pub fn cross(self: Self, other: Self) Self {
@@ -117,7 +122,7 @@ pub fn Vec3(comptime T: type) type {
 
         pub fn norm(self: Self) Self {
             switch (@typeInfo(T)) {
-                .Float => return self.scale(@as(T, @floatCast(1.0)) / self.len()),
+                .Float => return self.scale(1.0 / self.len()),
                 else => {
                     std.debug.print("DONT NORMALIZE NON FLOATS", .{});
                     return self;
@@ -165,6 +170,11 @@ pub fn Range(comptime T: type) type {
             return self.min <= val and val < self.max;
         }
 
+        pub fn containsFloat(self: Self, val: f32) bool {
+            //std.debug.print("{d:}<={d:}<{d:}", .{ @as(f32, @floatFromInt(self.min)), val, @as(f32, @floatFromInt(self.max)) });
+            return @as(f32, @floatFromInt(self.min)) <= val and val < @as(f32, @floatFromInt(self.max));
+        }
+
         pub fn splitHalf(self: Self) .{ Self, Self } {
             return .{
                 Self.new(self.min, (self.max + self.min) / 2),
@@ -181,6 +191,10 @@ pub fn Range(comptime T: type) type {
 
         pub fn len(self: Self) T {
             return self.max - self.min;
+        }
+
+        pub fn containsInclusive(self: Self, val: T) bool {
+            return self.min <= val and val <= self.max;
         }
     };
 }
@@ -200,19 +214,15 @@ pub fn Volume(comptime T: type) type {
             };
         }
 
-        pub fn contains(self: Self, coord: Vec3(T)) bool {
-            return self.xrange.contains(coord.x) and self.yrange.contains(coord.y) and self.zrange.contains(coord.z);
+        pub fn contains(self: Self, coord: Cell) bool {
+            return self.xrange.contains(coord.x()) and self.yrange.contains(coord.y()) and self.zrange.contains(coord.z());
         }
 
         pub fn containsFloat(
             self: Self,
             fcoord: Vec3(f32),
         ) bool {
-            if (@typeInfo(T) != .Int) std.debug.print("DONT USE THIS FOR f32 VOLUMES!", .{});
-            if (fcoord.cell()) |coord| {
-                return self.xrange.contains(coord.vec.x) and self.yrange.contains(coord.vec.y) and self.zrange.contains(coord.vec.z);
-            }
-            return false;
+            return self.xrange.containsFloat(fcoord.x) and self.yrange.containsFloat(fcoord.y) and self.zrange.containsFloat(fcoord.z);
         }
 
         pub fn splitMiddle(self: Self, normal_axis: Axis) [2]Self {
@@ -322,18 +332,18 @@ pub fn Volume(comptime T: type) type {
 
         pub const VolumeIterator = struct {
             volume: Self,
-            next_cell: ?Vec3(T),
+            next_cell: ?Cell,
 
-            pub fn next(self: *@This()) ?Vec3(T) {
+            pub fn next(self: *@This()) ?Cell {
                 if (@typeInfo(T) != .Int) unreachable; // iterators not supported for non int space
                 if (self.next_cell) |cell| {
-                    self.next_cell.?.x += 1;
+                    self.next_cell.?.arr[0] += 1;
                     if (!self.volume.contains(self.next_cell.?)) {
-                        self.next_cell.?.x = self.volume.xrange.min;
-                        self.next_cell.?.y += 1;
+                        self.next_cell.?.arr[0] = self.volume.xrange.min;
+                        self.next_cell.?.arr[1] += 1;
                         if (!self.volume.contains(self.next_cell.?)) {
-                            self.next_cell.?.y = self.volume.yrange.min;
-                            self.next_cell.?.z += 1;
+                            self.next_cell.?.arr[1] = self.volume.yrange.min;
+                            self.next_cell.?.arr[2] += 1;
                             if (!self.volume.contains(self.next_cell.?)) {
                                 self.next_cell = null;
                             }
@@ -348,10 +358,9 @@ pub fn Volume(comptime T: type) type {
         };
 
         pub fn initIterator(self: Self) VolumeIterator {
-            return .{
-                .volume = self,
-                .next_cell = Vec3(T).new(self.xrange.min, self.yrange.min, self.zrange.min),
-            };
+            return .{ .volume = self, .next_cell = .{
+                .arr = .{ self.xrange.min, self.yrange.min, self.zrange.min },
+            } };
         }
 
         pub fn planes(self: Self) [6]Plane(T) {
