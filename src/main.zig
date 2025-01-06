@@ -19,7 +19,7 @@ pub fn main() !void {
         @floatFromInt(data.resulution[2] / 2),
     );
 
-    const camera_pos = geo.Vec3(f32).new(-10, -300, -10);
+    const camera_pos = geo.Vec3(f32).new(-30, -300, -30);
     const camera_dir = data_center.sub(camera_pos).norm();
 
     var c = camera_dir;
@@ -43,18 +43,24 @@ pub fn main() !void {
     std.debug.print("RT start...\n", .{});
     const start_time = std.time.milliTimestamp();
 
-    try slimRT(
-        camera_pos,
-        data_center.sub(camera_pos).norm(),
-        camera_up,
-        1000,
-        1000,
-        2.0,
-        kdt,
-        50,
-        true,
-        false,
-    );
+    for (0..256) |i| {
+        var buf: [64:0]u8 = undefined;
+        const file_name = std.fmt.bufPrint(&buf, "renders/out_iso{d}.png", .{i}) catch unreachable;
+        std.debug.print("\n{s}\n", .{buf});
+        try slimRT(
+            camera_pos,
+            data_center.sub(camera_pos).norm(),
+            camera_up,
+            1000,
+            1000,
+            2.0,
+            kdt,
+            @intCast(i),
+            file_name,
+            true,
+            false,
+        );
+    }
 
     const end_time = std.time.milliTimestamp();
 
@@ -70,6 +76,7 @@ pub fn slimRT(
     viewport_width: f32,
     kdt: SlimKDT,
     isoval: ISOVAL,
+    save_as: []const u8,
     comptime dbp: bool,
     comptime inner_dbp: bool,
 ) !void {
@@ -108,7 +115,7 @@ pub fn slimRT(
                 inner_dbp,
             );
             if (res.oob) {
-                img.pixels.rgb24[yi * width + xi] = .{ .r = 20, .g = 0, .b = 20 };
+                img.pixels.rgb24[yi * width + xi] = .{ .r = 20, .g = 0, .b = 90 };
                 oob_count += 1;
             } else if (res.hit) {
                 img.pixels.rgb24[yi * width + xi] = .{
@@ -154,7 +161,7 @@ pub fn slimRT(
             escape_help_events,
         });
     }
-    try img.writeToFilePath("out.png", .{ .png = .{} });
+    try img.writeToFilePath(save_as, .{ .png = .{} });
 }
 
 pub fn renderSlice(data: Data, x: u32) !void {

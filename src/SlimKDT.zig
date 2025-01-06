@@ -123,6 +123,7 @@ pub const RayRes = struct {
 
 pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bool) RayRes {
     var t: f32 = 0.0;
+    var escape_help_count: f32 = 0;
     var st = SpaceTracker.new(kdt);
 
     const do = ray.dir.gtz().cell().?; // to keep track of which planes we need to intersect with
@@ -132,9 +133,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
     t = @max(t, outer_planes[1 - do.x()].rayIntersect(ray));
     t = @max(t, outer_planes[3 - do.y()].rayIntersect(ray));
     t = @max(t, outer_planes[5 - do.z()].rayIntersect(ray));
-    t += 0.00001; // mini offset
-
-    var escape_help_count: f32 = 0;
+    t += 0.001; // mini offset
 
     if (comptime dbp)
         std.debug.print(
@@ -163,7 +162,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
 
     var cell = ray.point(t).cell().?;
     const enter_vol_t = t;
-    _ = enter_vol_t; // autofix
+
     while (st.node_space.containsFloat(ray.point(t))) {
         cell = ray.point(t).cell().?;
         if (comptime dbp)
@@ -187,7 +186,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
                     .t = t,
                     .hit = true,
                     .escape_help_count = escape_help_count,
-                    .enter_vol_t = t,
+                    .enter_vol_t = enter_vol_t,
                 }; // We have found a leaf node with relevant iso_value
             } else {
                 if (comptime dbp)
@@ -206,7 +205,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
         t = @min(t, planes[0 + do.x()].rayIntersect(ray));
         t = @min(t, planes[2 + do.y()].rayIntersect(ray));
         t = @min(t, planes[4 + do.z()].rayIntersect(ray));
-        t += 0.001; // mini offset
+        t += 0.0001; // mini offset
 
         if (comptime dbp)
             if (st.node_space.containsFloat(ray.point(t))) {
@@ -237,7 +236,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
         // escape help
         var i: f32 = 0;
         while (st.node_space.containsFloat(ray.point(t))) {
-            t += 0.01 * i; // mini offset
+            t += 0.001 * i; // mini offset
             if (i > 1) {
                 std.debug.print("!escape help needed! \n", .{});
             }
@@ -253,6 +252,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
         .t = t,
         .hit = false,
         .escape_help_count = escape_help_count,
+        .enter_vol_t = enter_vol_t,
     };
 }
 
