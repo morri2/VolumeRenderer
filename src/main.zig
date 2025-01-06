@@ -7,20 +7,8 @@ const geo = @import("geo.zig");
 const SlimKDT = @import("SlimKDT.zig");
 const ISOVAL = @import("typedef.zig").ISOVAL;
 pub fn main() !void {
-    //const tree = KDtree.newTestTree();
-    //_ = tree; // autofix
-    //tree.printTree();
-    std.debug.print("", .{});
-
-    std.debug.print("hello\n\n", .{});
-
-    var data = try Data.loadUCDcapped("Skull.vol", 255);
+    var data = try Data.loadUCD("Skull.vol", .{ .swap_x_y = true });
     data = data; // autofix
-
-    // const memory = try allocator.alloc(KDtree, 1);
-    // defer allocator.free(memory);
-
-    //const kdt: SlimKDT = .{ .nodes = undefined, .root_dim = .{ 0, 0, 0 }, .root_space = geo.Volume(u8).new(.{ 0, 0 }, .{ 0, 0 }, .{ 0, 0 }) };
 
     const kdt = SlimKDT.newEvenPartition(&data);
     //_ = kdt; // autofix
@@ -30,7 +18,8 @@ pub fn main() !void {
         @floatFromInt(data.resulution[1] / 2),
         @floatFromInt(data.resulution[2] / 2),
     );
-    const camera_pos = geo.Vec3(f32).new(-8, 0, -8);
+
+    const camera_pos = geo.Vec3(f32).new(-10, -300, -10);
     const camera_dir = data_center.sub(camera_pos).norm();
 
     var c = camera_dir;
@@ -91,6 +80,10 @@ pub fn slimRT(
     var miss_count: f32 = 0;
     var hit_count: f32 = 0;
     var avg_hit_t: f32 = 0;
+    var min_hit_t: f32 = std.math.inf(f32);
+    var max_hit_t: f32 = 0;
+
+    var escape_help_events: f32 = 0;
 
     //setup
     const right = forw.cross(up);
@@ -115,16 +108,23 @@ pub fn slimRT(
                 inner_dbp,
             );
             if (res.oob) {
-                img.pixels.rgb24[yi * width + xi] = .{ .r = 0, .g = 255, .b = 0 };
+                img.pixels.rgb24[yi * width + xi] = .{ .r = 20, .g = 0, .b = 20 };
                 oob_count += 1;
             } else if (res.hit) {
-                img.pixels.rgb24[yi * width + xi] = .{ .r = 255 - @as(u8, @intFromFloat(@min(128, res.t))), .b = @as(u8, @intFromFloat(@min(128, res.t))), .g = 0 };
+                img.pixels.rgb24[yi * width + xi] = .{
+                    .r = 255 - @as(u8, @intFromFloat(@min(200, res.t - 300))),
+                    .b = 255 - @as(u8, @intFromFloat(@min(200, res.t - 300))),
+                    .g = 255 - @as(u8, @intFromFloat(@min(200, res.t - 300))),
+                };
                 hit_count += 1;
                 avg_hit_t += res.t;
+                min_hit_t = @min(res.t, min_hit_t);
+                max_hit_t = @max(res.t, max_hit_t);
             } else {
-                img.pixels.rgb24[yi * width + xi] = .{ .r = 0, .g = 30, .b = 0 };
+                img.pixels.rgb24[yi * width + xi] = .{ .r = 0, .g = 0, .b = 0 };
                 miss_count += 1;
             }
+            escape_help_events += res.escape_help_count;
         }
         if (comptime dbp) {
             if ((yi * 10) % height == 0) {
@@ -142,13 +142,16 @@ pub fn slimRT(
             \\ {d:.1}% oobs
             \\ {d:.1}% miss
             \\
-            \\ {d:.1} avg t (hits)
-            \\ 
+            \\ {d:.1} avg t (hits). range: {d:.1}-{d:.1}
+            \\ {d:.1} escape help events
         , .{
             100 * hit_count / @as(f32, @floatFromInt(width * height)),
             100 * oob_count / @as(f32, @floatFromInt(width * height)),
             100 * miss_count / @as(f32, @floatFromInt(width * height)),
             avg_hit_t,
+            min_hit_t,
+            max_hit_t,
+            escape_help_events,
         });
     }
     try img.writeToFilePath("out.png", .{ .png = .{} });

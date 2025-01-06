@@ -5,8 +5,16 @@ resulution: [3]u32 = .{ 0, 0, 0 },
 allocator: std.heap.GeneralPurposeAllocator(.{}),
 data: []u8,
 
+pub const Options = struct {
+    swap_x_y: bool = false,
+};
+
 /// function for format from ucd https://web.cs.ucdavis.edu/~okreylos/PhDStudies/Spring2000/ECS277/DataSets.html
-pub fn loadUCD(file_name: []const u8) !@This() {
+pub fn loadUCD(
+    file_name: []const u8,
+    options: Options,
+) !@This() {
+    _ = options; // autofix
     var file = try std.fs.cwd().openFile(file_name, .{});
     defer file.close();
 
@@ -28,10 +36,16 @@ pub fn loadUCD(file_name: []const u8) !@This() {
     for (0..xdim) |x| {
         for (0..ydim) |y| {
             for (0..zdim) |z| {
-                new.set(reader.readByte() catch unreachable, @intCast(x), @intCast(y), @intCast(z));
+                new.set(
+                    reader.readByte() catch unreachable,
+                    @intCast(x),
+                    @intCast(y),
+                    @intCast(z),
+                );
             }
         }
     }
+
     return new;
 }
 
@@ -92,7 +106,16 @@ pub fn size(self: *const @This()) usize {
 }
 
 pub fn getCornerDens(self: *const @This(), cell: geo.Cell) [8]ISOVAL {
-    return .{ self.get(cell.x(), cell.y(), cell.z()), self.get(cell.x() + 1, cell.y(), cell.z()), self.get(cell.x(), cell.y() + 1, cell.z()), self.get(cell.x(), cell.y(), cell.z() + 1), self.get(cell.x() + 1, cell.y() + 1, cell.z()), self.get(cell.x(), cell.y() + 1, cell.z() + 1), self.get(cell.x() + 1, cell.y(), cell.z() + 1), self.get(cell.x() + 1, cell.y() + 1, cell.z() + 1) };
+    return .{
+        self.get(cell.x(), cell.y(), cell.z()),
+        self.get(cell.x() + 1, cell.y(), cell.z()),
+        self.get(cell.x(), cell.y() + 1, cell.z()),
+        self.get(cell.x(), cell.y(), cell.z() + 1),
+        self.get(cell.x() + 1, cell.y() + 1, cell.z()),
+        self.get(cell.x(), cell.y() + 1, cell.z() + 1),
+        self.get(cell.x() + 1, cell.y(), cell.z() + 1),
+        self.get(cell.x() + 1, cell.y() + 1, cell.z() + 1),
+    };
 }
 
 pub fn getCornerDensRange(self: *const @This(), cell: geo.Cell) geo.Range(ISOVAL) {

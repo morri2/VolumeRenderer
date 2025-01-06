@@ -117,7 +117,8 @@ pub const RayRes = struct {
     t: f32 = 0,
     hit: bool = false,
     oob: bool = false,
-    t_vol_enter: f32 = 0,
+    escape_help_count: f32 = 0,
+    enter_vol_t: f32 = 0,
 };
 
 pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bool) RayRes {
@@ -133,8 +134,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
     t = @max(t, outer_planes[5 - do.z()].rayIntersect(ray));
     t += 0.00001; // mini offset
 
-    const t_vol_enter = t;
-    _ = t_vol_enter; // autofix
+    var escape_help_count: f32 = 0;
 
     if (comptime dbp)
         std.debug.print(
@@ -162,8 +162,10 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
     }
 
     var cell = ray.point(t).cell().?;
-
+    const enter_vol_t = t;
+    _ = enter_vol_t; // autofix
     while (st.node_space.containsFloat(ray.point(t))) {
+        cell = ray.point(t).cell().?;
         if (comptime dbp)
             std.debug.print(
                 \\ 
@@ -184,6 +186,8 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
                 return .{
                     .t = t,
                     .hit = true,
+                    .escape_help_count = escape_help_count,
+                    .enter_vol_t = t,
                 }; // We have found a leaf node with relevant iso_value
             } else {
                 if (comptime dbp)
@@ -202,7 +206,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
         t = @min(t, planes[0 + do.x()].rayIntersect(ray));
         t = @min(t, planes[2 + do.y()].rayIntersect(ray));
         t = @min(t, planes[4 + do.z()].rayIntersect(ray));
-        t += 0.0001; // mini offset
+        t += 0.001; // mini offset
 
         if (comptime dbp)
             if (st.node_space.containsFloat(ray.point(t))) {
@@ -230,30 +234,47 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
                 });
             };
 
+        // escape help
+        var i: f32 = 0;
+        while (st.node_space.containsFloat(ray.point(t))) {
+            t += 0.01 * i; // mini offset
+            if (i > 1) {
+                std.debug.print("!escape help needed! \n", .{});
+            }
+            i += 1;
+            escape_help_count += 1;
+        }
+
         std.debug.assert(!st.node_space.containsFloat(ray.point(t))); // we must have moved outside the thing, otherwise bad...
-        cell = ray.point(t).cell().?;
+
         st.reset(); // return to root
     }
     return .{
         .t = t,
         .hit = false,
+        .escape_help_count = escape_help_count,
     };
+}
+
+pub fn saveToFile(self: Self) !void {
+    _ = self; // autofix
+
 }
 
 /////// BUILD A TREE
 pub fn init(data: *Data, allocator: std.mem.Allocator) Self {
     const kdt: Self = .{
         .root_dim = .{
-            @intCast(data.resulution[0]),
-            @intCast(data.resulution[1]),
-            @intCast(data.resulution[2]),
+            @intCast(data.resulution[0] - 1),
+            @intCast(data.resulution[1] - 1),
+            @intCast(data.resulution[2] - 1),
         },
         .root_space = geo.Volume(SPACESIZE).new(
-            .{ 0, @intCast(data.resulution[0]) },
-            .{ 0, @intCast(data.resulution[1]) },
-            .{ 0, @intCast(data.resulution[2]) },
+            .{ 0, @intCast(data.resulution[0] - 1) },
+            .{ 0, @intCast(data.resulution[1] - 1) },
+            .{ 0, @intCast(data.resulution[2] - 1) },
         ),
-        .nodes = allocator.alloc(SlimNode, data.size() * 10) catch unreachable,
+        .nodes = allocator.alloc(SlimNode, data.size() * 16) catch unreachable,
         .allocator = allocator,
     };
     return kdt;
@@ -280,10 +301,11 @@ pub fn newEvenPartitionInner(kdt: *Self, data: *Data, st: SpaceTracker) void {
     }
 
     var iter = st.node_space.initIterator();
-    while (iter.next()) |s| {
-        const v = data.get(s.x(), s.y(), s.z());
-        min_d = @min(min_d, v);
-        max_d = @max(max_d, v);
+    while (iter.next()) |c| {
+        for (data.getCornerDens(c)) |v| {
+            min_d = @min(min_d, v);
+            max_d = @max(max_d, v);
+        }
     }
 
     const partition: u8 = @intCast(( //
