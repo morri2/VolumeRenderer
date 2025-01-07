@@ -15,6 +15,7 @@ root_dim: [3]SPACESIZE,
 root_space: geo.Volume(SPACESIZE),
 nodes: []SlimNode,
 allocator: std.mem.Allocator,
+data: *const Data,
 
 // ////////// //
 // INDEX MATH //
@@ -119,6 +120,7 @@ pub const RayRes = struct {
     oob: bool = false,
     escape_help_count: f32 = 0,
     enter_vol_t: f32 = 0,
+    checked_nodes: u64 = 0,
 };
 
 pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bool) RayRes {
@@ -127,6 +129,8 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
     var st = SpaceTracker.new(kdt);
 
     const do = ray.dir.gtz().cell().?; // to keep track of which planes we need to intersect with
+
+    var checked_nodes: u64 = 0;
 
     // SHMOOVE US INTO THE SPACE
     const outer_planes = st.node_space.planes();
@@ -164,6 +168,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
     const enter_vol_t = t;
 
     while (st.node_space.containsFloat(ray.point(t))) {
+        checked_nodes += 1;
         cell = ray.point(t).cell().?;
         if (comptime dbp)
             std.debug.print(
@@ -187,6 +192,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
                     .hit = true,
                     .escape_help_count = escape_help_count,
                     .enter_vol_t = enter_vol_t,
+                    .checked_nodes = checked_nodes,
                 }; // We have found a leaf node with relevant iso_value
             } else {
                 if (comptime dbp)
@@ -253,6 +259,7 @@ pub fn traceRay(ray: geo.Ray, kdt: *const Self, isoval: ISOVAL, comptime dbp: bo
         .hit = false,
         .escape_help_count = escape_help_count,
         .enter_vol_t = enter_vol_t,
+        .checked_nodes = checked_nodes,
     };
 }
 
@@ -274,12 +281,14 @@ pub fn init(data: *Data, allocator: std.mem.Allocator) Self {
             .{ 0, @intCast(data.resulution[1] - 1) },
             .{ 0, @intCast(data.resulution[2] - 1) },
         ),
-        .nodes = allocator.alloc(SlimNode, data.size() * 16) catch unreachable,
+        .nodes = allocator.alloc(SlimNode, data.size() * 2) catch unreachable,
         .allocator = allocator,
+        .data = data,
     };
     return kdt;
 }
 
+// EVEN PARTITION
 pub fn newEvenPartition(data: *Data) Self {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var kdt: Self = init(data, gpa.allocator());
@@ -289,6 +298,7 @@ pub fn newEvenPartition(data: *Data) Self {
 
     newEvenPartitionInner(&kdt, data, st);
     std.debug.print("Building new tree: {d} nodes len\n", .{kdt.nodes.len});
+    std.debug.print("layers: {}\n", .{max_layer});
     return kdt;
 }
 
@@ -299,6 +309,13 @@ pub fn newEvenPartitionInner(kdt: *Self, data: *Data, st: SpaceTracker) void {
     if (st.node_space.size() < 1) {
         return;
     }
+
+    if (st.node_idx >= kdt.nodes.len) {
+        kdt.nodes = kdt.allocator.realloc(kdt.nodes, (kdt.nodes.len * @sizeOf(SlimNode)) << 2) catch @panic("not enough mem");
+        std.debug.print("REALLOCING!!!!!\n\n\n", .{});
+    }
+
+    if (st.layer > max_layer) max_layer = st.layer;
 
     var iter = st.node_space.initIterator();
     while (iter.next()) |c| {
@@ -326,4 +343,118 @@ pub fn newEvenPartitionInner(kdt: *Self, data: *Data, st: SpaceTracker) void {
 
     newEvenPartitionInner(kdt, data, st.leftHalf());
     newEvenPartitionInner(kdt, data, st.rightHalf());
+}
+
+// EVEN PARTITION
+pub fn newSlantedPartition(data: *Data) Self {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var kdt: Self = init(data, gpa.allocator());
+    const st = SpaceTracker.new(&kdt);
+
+    std.debug.print("Building new tree: {d} nodes len\n", .{kdt.nodes.len});
+
+    newSlantedPartitionInner(&kdt, data, st);
+    std.debug.print("Building new tree: {d} nodes len\n", .{kdt.nodes.len});
+
+    std.debug.print("layers: {}\n", .{max_layer});
+    return kdt;
+}
+
+var layer_densities: [1024]struct { min: ISOVAL = std.math.maxInt(ISOVAL), max: ISOVAL = 0 } = undefined;
+var max_layer: u32 = 0;
+
+pub fn newSlantedPartitionInner(kdt: *Self, data: *Data, st: SpaceTracker) void {
+    if (st.node_space.size() < 1)
+        return;
+
+    if (st.layer > max_layer) max_layer = st.layer;
+
+    if (st.node_idx >= kdt.nodes.len) {
+        kdt.nodes = kdt.allocator.realloc(kdt.nodes, (kdt.nodes.len * @sizeOf(SlimNode)) << 2) catch @panic("not enough mem");
+        std.debug.print("REALLOCING!!!!!\n\n\n", .{});
+    }
+
+    var min_d: ISOVAL = std.math.maxInt(ISOVAL);
+    var max_d: ISOVAL = 0;
+
+    layer_densities = .{.{}} ** 1024;
+
+    var iter = st.node_space.initIterator();
+    while (iter.next()) |c| {
+        for (data.getCornerDens(c)) |v| {
+            min_d = @min(min_d, v);
+            max_d = @max(max_d, v);
+
+            layer_densities[c.arr[st.next_split_axis.idx()]].min = @min(layer_densities[c.arr[st.next_split_axis.idx()]].min, v);
+            layer_densities[c.arr[st.next_split_axis.idx()]].max = @max(layer_densities[c.arr[st.next_split_axis.idx()]].max, v);
+        }
+    }
+    const mid_partition: u8 = @intCast(( //
+        @as(u32, @intCast(st.node_space.getAxisRange(st.next_split_axis).min)) + //
+        @as(u32, @intCast(st.node_space.getAxisRange(st.next_split_axis).max))) / 2);
+    var best_partition: u8 = mid_partition;
+
+    var best_heuristic: f32 = 9999999.9;
+
+    const p_low: u8 = @intCast(( //
+        @as(u32, @intCast(st.node_space.getAxisRange(st.next_split_axis).min)) + //
+        @as(u32, @intCast(mid_partition))) / 2);
+    const p_high: u8 = @intCast(( //
+        @as(u32, @intCast(st.node_space.getAxisRange(st.next_split_axis).max)) + //
+        @as(u32, @intCast(mid_partition))) / 2);
+
+    // OPTIM
+    if (st.node_space.getAxisRange(st.next_split_axis).min + 1 < st.node_space.getAxisRange(st.next_split_axis).max and max_layer < 16) {
+        for (p_low..p_high) |p_cand| {
+            // MIN SQUARE SUM
+            var left_max: f32 = 0;
+            var left_min: f32 = std.math.inf(f32);
+
+            var right_max: f32 = 0;
+            var right_min: f32 = std.math.inf(f32);
+
+            for (st.node_space.getAxisRange(st.next_split_axis).min..p_cand) |i| {
+                left_max = @max(left_max, @as(f32, @floatFromInt(layer_densities[i].max)));
+                left_min = @min(left_min, @as(f32, @floatFromInt(layer_densities[i].min)));
+            }
+
+            for (p_cand..st.node_space.getAxisRange(st.next_split_axis).max) |i| {
+                right_max = @max(right_max, @as(f32, @floatFromInt(layer_densities[i].max)));
+                right_min = @min(right_min, @as(f32, @floatFromInt(layer_densities[i].min)));
+            }
+
+            const h_cand = std.math.pow(f32, (right_max - right_min), 2) + std.math.pow(f32, (left_max - left_min), 2) //
+            + @abs(@as(f32, @floatFromInt(p_cand)) - @as(f32, @floatFromInt(mid_partition)));
+
+            //std.debug.print("  pcand {}  h={d:.2},\n", .{ p_cand, h_cand });
+            if (h_cand < best_heuristic) {
+                best_partition = @intCast(p_cand);
+                best_heuristic = h_cand;
+            }
+        }
+    }
+
+    //std.debug.print("\nspace {} \n", .{st.node_space.size()});
+    kdt.nodes[st.node_idx] = .{
+        .partition = best_partition,
+        .density_range = geo.Range(ISOVAL).new(
+            min_d,
+            max_d,
+        ),
+    };
+
+    if (st.node_space.size() == 1) {
+        return;
+    }
+
+    //std.debug.print("split l={}, partition: {} | {} | {}                 maxlayer: {}\n", .{
+    //    st.layer,
+    //    st.node_space.getAxisRange(st.next_split_axis).min,
+    //    best_partition,
+    //    st.node_space.getAxisRange(st.next_split_axis).max,
+    //    max_layer,
+    //});
+
+    newSlantedPartitionInner(kdt, data, st.leftHalf());
+    newSlantedPartitionInner(kdt, data, st.rightHalf());
 }

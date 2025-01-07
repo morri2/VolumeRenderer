@@ -110,10 +110,11 @@ pub fn getCornerDens(self: *const @This(), cell: geo.Cell) [8]ISOVAL {
         self.get(cell.x(), cell.y(), cell.z()),
         self.get(cell.x() + 1, cell.y(), cell.z()),
         self.get(cell.x(), cell.y() + 1, cell.z()),
-        self.get(cell.x(), cell.y(), cell.z() + 1),
         self.get(cell.x() + 1, cell.y() + 1, cell.z()),
-        self.get(cell.x(), cell.y() + 1, cell.z() + 1),
+
+        self.get(cell.x(), cell.y(), cell.z() + 1),
         self.get(cell.x() + 1, cell.y(), cell.z() + 1),
+        self.get(cell.x(), cell.y() + 1, cell.z() + 1),
         self.get(cell.x() + 1, cell.y() + 1, cell.z() + 1),
     };
 }

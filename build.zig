@@ -27,6 +27,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const opts = .{ .target = target, .optimize = optimize };
+    const zbench_module = b.dependency("zbench", opts).module("zbench");
+
+    exe.root_module.addImport("zbench", zbench_module);
     exe.root_module.addImport("zigimg", zigimg.module("zigimg"));
     // you need to link to the output of the build process
     // that was done by the duck package
