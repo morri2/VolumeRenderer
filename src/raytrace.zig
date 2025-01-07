@@ -44,7 +44,7 @@ pub fn renderImage(
 
             const dir = forw.add(up.scale(yf).add(right.scale(xf))).norm();
 
-            const res = SlimKDT.traceRay(
+            const res = traceRay(
                 .{ .dir = dir, .origin = src },
                 kdt,
                 isoval,
@@ -103,6 +103,155 @@ pub fn renderImage(
         });
     }
     return .{ .nodes_checked = node_checks };
+}
+
+pub const RayRes = struct {
+    t: f32 = 0,
+    hit: bool = false,
+    oob: bool = false,
+    escape_help_count: f32 = 0,
+    enter_vol_t: f32 = 0,
+    checked_nodes: u64 = 0,
+};
+
+pub fn traceRay(ray: geo.Ray, kdt: *const SlimKDT, isoval: ISOVAL, comptime dbp: bool) RayRes {
+    var t: f32 = 0.0;
+    var escape_help_count: f32 = 0;
+    var st = SlimKDT.SpaceTracker.new(kdt);
+
+    const do = ray.dir.gtz().cell().?; // to keep track of which planes we need to intersect with
+
+    var checked_nodes: u64 = 0;
+
+    // SHMOOVE US INTO THE SPACE
+    const outer_planes = st.node_space.planes();
+    t = @max(t, outer_planes[1 - do.x()].rayIntersect(ray));
+    t = @max(t, outer_planes[3 - do.y()].rayIntersect(ray));
+    t = @max(t, outer_planes[5 - do.z()].rayIntersect(ray));
+    t += 0.001; // mini offset
+
+    if (comptime dbp)
+        std.debug.print(
+            \\ 
+            \\
+            \\ ### NEW RAY ### 
+            \\d= ({d:.2} {d:.2} {d:.2})  o= ({d:.2} {d:.2} {d:.2})
+            \\skip to ({d:.2} {d:.2} {d:.2}) t={d:.3}
+            \\
+        , .{
+            ray.dir.x,      ray.dir.y,      ray.dir.z,
+            ray.origin.x,   ray.origin.y,   ray.origin.z,
+            ray.point(t).x, ray.point(t).y, ray.point(t).z,
+            t,
+        });
+
+    if (!st.node_space.containsFloat(ray.point(t))) {
+        if (comptime dbp) std.debug.print(
+            \\
+            \\ oob
+            \\ 
+            \\
+        , .{});
+        return .{ .oob = true };
+    }
+
+    var cell = ray.point(t).cell().?;
+    const enter_vol_t = t;
+
+    while (st.node_space.containsFloat(ray.point(t))) {
+        checked_nodes += 1;
+        cell = ray.point(t).cell().?;
+        if (comptime dbp)
+            std.debug.print(
+                \\ 
+                \\t={d:.3}  r=({d:.2} {d:.2} {d:.2})
+                \\node={}   size={}   iso=[{}-{}] v {}
+                \\  res: 
+            , .{
+                t,           ray.point(t).x,       ray.point(t).y,                           ray.point(t).z,
+                st.node_idx, st.node_space.size(), kdt.nodes[st.node_idx].density_range.min, kdt.nodes[st.node_idx].density_range.max,
+                isoval,
+            });
+
+        // ZOOM if isovalue is in range
+        if (kdt.nodes[st.node_idx].density_range.containsInclusive(isoval)) {
+            if (st.node_space.size() == 1) {
+                if (comptime dbp)
+                    std.debug.print("HIT!\n", .{});
+                return .{
+                    .t = t,
+                    .hit = true,
+                    .escape_help_count = escape_help_count,
+                    .enter_vol_t = enter_vol_t,
+                    .checked_nodes = checked_nodes,
+                }; // We have found a leaf node with relevant iso_value
+            } else {
+                if (comptime dbp)
+                    std.debug.print("ZOOM!\n", .{});
+                st.zoom(cell);
+                continue; // ZOOM in
+            }
+        }
+
+        // MOVE if
+        if (comptime dbp)
+            std.debug.print("MOVE!\n", .{});
+        const planes = st.node_space.planes();
+        t = std.math.inf(f32);
+
+        t = @min(t, planes[0 + do.x()].rayIntersect(ray));
+        t = @min(t, planes[2 + do.y()].rayIntersect(ray));
+        t = @min(t, planes[4 + do.z()].rayIntersect(ray));
+        t += 0.0001; // mini offset
+
+        if (comptime dbp)
+            if (st.node_space.containsFloat(ray.point(t))) {
+                std.debug.print(
+                    \\
+                    \\VOLUME NOT ESQd!!!
+                    \\x: {} {}
+                    \\y: {} {}
+                    \\z: {} {}
+                    \\
+                    \\
+                , .{
+                    st.node_space.xrange.min,
+                    st.node_space.xrange.max,
+                    st.node_space.yrange.min,
+                    st.node_space.yrange.max,
+                    st.node_space.zrange.min,
+                    st.node_space.zrange.max,
+                });
+                std.debug.print("previous node not escaped!\n t={d} ({d} {d} {d})\n", .{
+                    t,
+                    ray.point(t).x,
+                    ray.point(t).y,
+                    ray.point(t).z,
+                });
+            };
+
+        // escape help
+        var i: f32 = 0;
+        while (st.node_space.containsFloat(ray.point(t))) {
+            t += 0.001 * i; // mini offset
+            if (i > 1) {
+                std.debug.print("!escape help needed! \n", .{});
+            }
+            i += 1;
+            escape_help_count += 1;
+        }
+
+        std.debug.assert(!st.node_space.containsFloat(ray.point(t))); // we must have moved outside the thing, otherwise bad...
+
+        st.reset(); // return to root
+    }
+    return .{
+        .t = t,
+        .hit = false,
+        .escape_help_count = escape_help_count,
+        .enter_vol_t = enter_vol_t,
+        .checked_nodes = checked_nodes,
+    };
 }
 
 pub fn trilerp(

@@ -3,7 +3,7 @@ const ISOVAL = @import("typedef.zig").ISOVAL;
 
 pub const VecF: type = Vec3(f32);
 const std = @import("std");
-pub const Axis = enum {
+pub const Axis = enum(u2) {
     const Self = @This();
     X,
     Y,

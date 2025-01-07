@@ -5,16 +5,10 @@ resulution: [3]u32 = .{ 0, 0, 0 },
 allocator: std.heap.GeneralPurposeAllocator(.{}),
 data: []u8,
 
-pub const Options = struct {
-    swap_x_y: bool = false,
-};
-
 /// function for format from ucd https://web.cs.ucdavis.edu/~okreylos/PhDStudies/Spring2000/ECS277/DataSets.html
 pub fn loadUCD(
     file_name: []const u8,
-    options: Options,
 ) !@This() {
-    _ = options; // autofix
     var file = try std.fs.cwd().openFile(file_name, .{});
     defer file.close();
 
