@@ -18,7 +18,7 @@ pub fn renderImage(
     isoval: ISOVAL,
     comptime dbp: bool,
     comptime inner_dbp: bool,
-) !void {
+) !struct { nodes_checked: u64 } {
     const width = img.width;
     const height = img.height;
     const pixel_size = viewport_width / @as(f32, @floatFromInt(width));
@@ -30,6 +30,7 @@ pub fn renderImage(
     var avg_hit_t: f32 = 0;
     var min_hit_t: f32 = std.math.inf(f32);
     var max_hit_t: f32 = 0;
+    var node_checks: u64 = 0;
 
     var escape_help_events: f32 = 0;
 
@@ -66,6 +67,7 @@ pub fn renderImage(
                 img.pixels.rgb24[yi * width + xi] = .{ .r = 0, .g = 0, .b = 0 };
                 miss_count += 1;
             }
+            node_checks += res.checked_nodes;
             escape_help_events += res.escape_help_count;
         }
         if (comptime dbp) {
@@ -86,6 +88,9 @@ pub fn renderImage(
             \\
             \\ {d:.1} avg t (hits). range: {d:.1}-{d:.1}
             \\ {d:.1} escape help events
+            \\ {} nodes checked
+            \\
+            \\
         , .{
             100 * hit_count / @as(f32, @floatFromInt(width * height)),
             100 * oob_count / @as(f32, @floatFromInt(width * height)),
@@ -94,8 +99,10 @@ pub fn renderImage(
             min_hit_t,
             max_hit_t,
             escape_help_events,
+            node_checks,
         });
     }
+    return .{ .nodes_checked = node_checks };
 }
 
 pub fn trilerp(

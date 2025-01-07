@@ -423,7 +423,7 @@ pub fn newSlantedPartitionInner(kdt: *Self, data: *Data, st: SpaceTracker) void 
                 right_min = @min(right_min, @as(f32, @floatFromInt(layer_densities[i].min)));
             }
 
-            const h_cand = std.math.pow(f32, (right_max - right_min), 2) + std.math.pow(f32, (left_max - left_min), 2) //
+            const h_cand = ((right_max - right_min) * (left_max - left_min)) //
             + @abs(@as(f32, @floatFromInt(p_cand)) - @as(f32, @floatFromInt(mid_partition)));
 
             //std.debug.print("  pcand {}  h={d:.2},\n", .{ p_cand, h_cand });
