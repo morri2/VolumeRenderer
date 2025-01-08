@@ -51,7 +51,7 @@ pub fn renderImage(
                 inner_dbp,
             );
             if (res.oob) {
-                img.pixels.rgb24[yi * width + xi] = .{ .r = 20, .g = 0, .b = 90 };
+                img.pixels.rgb24[yi * width + xi] = .{ .r = 0, .g = 0, .b = 0 };
                 oob_count += 1;
             } else if (res.hit) {
                 img.pixels.rgb24[yi * width + xi] = .{

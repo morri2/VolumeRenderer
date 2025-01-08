@@ -218,16 +218,21 @@ pub const PartitionBuildData = struct {
     number_of_nodes: u64 = 0,
 };
 
+pub var PARTITION_BUILD_DATA_OUT: PartitionBuildData = undefined;
 pub fn newHeursiticPartition(
     data: *Data,
     comptime Heuristic: fn (p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32,
-) Self {
+) !Self {
+    MAX_LAYER_SEEN = 0;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var kdt: Self = init(data, gpa.allocator());
     const st = SpaceTracker.new(&kdt);
 
     std.debug.print("Starting building tree...\n", .{});
-    const r = newHeuristicPartitionInner(&kdt, data, st, Heuristic);
+    const r = newHeuristicPartitionInner(&kdt, data, st, Heuristic) catch |e| {
+        kdt.deinit();
+        return e;
+    };
     std.debug.print(
         \\
         \\ KDT Built
@@ -236,6 +241,7 @@ pub fn newHeursiticPartition(
         \\ layers: {} (deepest point)
         \\
     , .{ r.number_of_nodes, r.non_center_partition_count, r.layer_count });
+    PARTITION_BUILD_DATA_OUT = r;
     return kdt;
 }
 
@@ -244,7 +250,7 @@ pub fn newHeuristicPartitionInner(
     data: *Data,
     st: SpaceTracker,
     comptime Heuristic: fn (p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32,
-) PartitionBuildData {
+) !PartitionBuildData {
     var min_d: ISOVAL = std.math.maxInt(ISOVAL);
     var max_d: ISOVAL = 0;
 
@@ -258,12 +264,12 @@ pub fn newHeuristicPartitionInner(
     const next_split_axis = st.node_space.largestDim();
 
     if (st.node_idx >= kdt.nodes.len) {
-        kdt.nodes = kdt.allocator.realloc(kdt.nodes, (kdt.nodes.len * @sizeOf(SlimNode)) << 2) catch {
+        kdt.nodes = kdt.allocator.realloc(kdt.nodes, (kdt.nodes.len * @sizeOf(SlimNode)) << 2) catch |e| {
             std.debug.print("( layers so far: {} )", .{MAX_LAYER_SEEN});
-            @panic("not enough mem");
+            return e;
         };
 
-        std.debug.print("REALLOCING!!!!!\n\n\n", .{});
+        std.debug.print("  > More memory required, reallocing\n", .{});
     }
 
     var iter = st.node_space.initIterator();
@@ -305,8 +311,8 @@ pub fn newHeuristicPartitionInner(
         return .{ .number_of_nodes = 1, .layer_count = st.layer };
     }
 
-    const r1 = newHeuristicPartitionInner(kdt, data, st.leftHalf(), Heuristic);
-    const r2 = newHeuristicPartitionInner(kdt, data, st.rightHalf(), Heuristic);
+    const r1 = try newHeuristicPartitionInner(kdt, data, st.leftHalf(), Heuristic);
+    const r2 = try newHeuristicPartitionInner(kdt, data, st.rightHalf(), Heuristic);
 
     return .{
         .non_center_partition_count = r1.non_center_partition_count + r2.non_center_partition_count + @intFromBool(mid_partition != best_partition),
@@ -360,18 +366,233 @@ pub fn AlwaysCenterH(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.A
     }
 }
 
-pub fn MixRootsideH(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
-    if (st.layer > 16) {
-        return AlwaysCenterH(p, mid, st, axis);
-    } else {
+pub fn FlexibleFirst5(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    if (st.layer < 5) {
         return MinimizeSpanHeuristic(p, mid, st, axis);
+    } else {
+        return AlwaysCenterH(p, mid, st, axis);
     }
 }
 
-pub fn MixLeafsideH(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
-    if (st.layer < 16) {
-        return AlwaysCenterH(p, mid, st, axis);
-    } else {
+pub fn FlexibleFirst10(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    if (st.layer < 10) {
         return MinimizeSpanHeuristic(p, mid, st, axis);
+    } else {
+        return AlwaysCenterH(p, mid, st, axis);
     }
+}
+
+pub fn FlexibleAfter10(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    if (st.layer > 10) {
+        return MinimizeSpanHeuristic(p, mid, st, axis);
+    } else {
+        return AlwaysCenterH(p, mid, st, axis);
+    }
+}
+pub fn FlexibleAfter15(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    if (st.layer > 15) {
+        return MinimizeSpanHeuristic(p, mid, st, axis);
+    } else {
+        return AlwaysCenterH(p, mid, st, axis);
+    }
+}
+
+pub fn FlexibleAfter20(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    if (st.layer > 20) {
+        return MinimizeSpanHeuristic(p, mid, st, axis);
+    } else {
+        return AlwaysCenterH(p, mid, st, axis);
+    }
+}
+
+pub fn FlexibleCenterWeighted5(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    const halfs = st.node_space.splitGlobal(axis, p);
+
+    var left_iter = halfs[0].initIterator();
+    var right_iter = halfs[1].initIterator();
+
+    var left_max: SPACESIZE = 0;
+    var left_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    var right_max: SPACESIZE = 0;
+    var right_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    while (left_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        left_min = @min(left_min, cdr.min);
+        left_max = @max(left_max, cdr.max);
+    }
+
+    while (right_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        right_min = @min(right_min, cdr.min);
+        right_max = @max(right_max, cdr.max);
+    }
+
+    var h: f32 = 0;
+    h += @abs(@as(f32, @floatFromInt(p)) - @as(f32, @floatFromInt(mid))) * 5; // penalty for deviation from mid
+    h += @abs(@as(f32, @floatFromInt(left_max)) - @as(f32, @floatFromInt(left_min))); // penalty for range of isovalues on left side
+    h += @abs(@as(f32, @floatFromInt(right_max)) - @as(f32, @floatFromInt(right_min))); // penalty for range of isovalues on right side
+
+    return h;
+}
+
+pub fn FlexibleCenterWeighted10(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    const halfs = st.node_space.splitGlobal(axis, p);
+
+    var left_iter = halfs[0].initIterator();
+    var right_iter = halfs[1].initIterator();
+
+    var left_max: SPACESIZE = 0;
+    var left_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    var right_max: SPACESIZE = 0;
+    var right_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    while (left_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        left_min = @min(left_min, cdr.min);
+        left_max = @max(left_max, cdr.max);
+    }
+
+    while (right_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        right_min = @min(right_min, cdr.min);
+        right_max = @max(right_max, cdr.max);
+    }
+
+    var h: f32 = 0;
+    h += @abs(@as(f32, @floatFromInt(p)) - @as(f32, @floatFromInt(mid))) * 10; // penalty for deviation from mid
+    h += @abs(@as(f32, @floatFromInt(left_max)) - @as(f32, @floatFromInt(left_min))); // penalty for range of isovalues on left side
+    h += @abs(@as(f32, @floatFromInt(right_max)) - @as(f32, @floatFromInt(right_min))); // penalty for range of isovalues on right side
+
+    return h;
+}
+
+pub fn FlexibleCenterWeighted30(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    const halfs = st.node_space.splitGlobal(axis, p);
+
+    var left_iter = halfs[0].initIterator();
+    var right_iter = halfs[1].initIterator();
+
+    var left_max: SPACESIZE = 0;
+    var left_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    var right_max: SPACESIZE = 0;
+    var right_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    while (left_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        left_min = @min(left_min, cdr.min);
+        left_max = @max(left_max, cdr.max);
+    }
+
+    while (right_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        right_min = @min(right_min, cdr.min);
+        right_max = @max(right_max, cdr.max);
+    }
+
+    var h: f32 = 0;
+    h += @abs(@as(f32, @floatFromInt(p)) - @as(f32, @floatFromInt(mid))) * 30; // penalty for deviation from mid
+    h += @abs(@as(f32, @floatFromInt(left_max)) - @as(f32, @floatFromInt(left_min))); // penalty for range of isovalues on left side
+    h += @abs(@as(f32, @floatFromInt(right_max)) - @as(f32, @floatFromInt(right_min))); // penalty for range of isovalues on right side
+
+    return h;
+}
+
+pub fn FlexibleCenterWeighted50(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    const halfs = st.node_space.splitGlobal(axis, p);
+
+    var left_iter = halfs[0].initIterator();
+    var right_iter = halfs[1].initIterator();
+
+    var left_max: SPACESIZE = 0;
+    var left_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    var right_max: SPACESIZE = 0;
+    var right_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    while (left_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        left_min = @min(left_min, cdr.min);
+        left_max = @max(left_max, cdr.max);
+    }
+
+    while (right_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        right_min = @min(right_min, cdr.min);
+        right_max = @max(right_max, cdr.max);
+    }
+
+    var h: f32 = 0;
+    h += @abs(@as(f32, @floatFromInt(p)) - @as(f32, @floatFromInt(mid))) * 50; // penalty for deviation from mid
+    h += @abs(@as(f32, @floatFromInt(left_max)) - @as(f32, @floatFromInt(left_min))); // penalty for range of isovalues on left side
+    h += @abs(@as(f32, @floatFromInt(right_max)) - @as(f32, @floatFromInt(right_min))); // penalty for range of isovalues on right side
+
+    return h;
+}
+
+pub fn FlexibleCenterWeighted75(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    const halfs = st.node_space.splitGlobal(axis, p);
+
+    var left_iter = halfs[0].initIterator();
+    var right_iter = halfs[1].initIterator();
+
+    var left_max: SPACESIZE = 0;
+    var left_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    var right_max: SPACESIZE = 0;
+    var right_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    while (left_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        left_min = @min(left_min, cdr.min);
+        left_max = @max(left_max, cdr.max);
+    }
+
+    while (right_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        right_min = @min(right_min, cdr.min);
+        right_max = @max(right_max, cdr.max);
+    }
+
+    var h: f32 = 0;
+    h += @abs(@as(f32, @floatFromInt(p)) - @as(f32, @floatFromInt(mid))) * 75; // penalty for deviation from mid
+    h += @abs(@as(f32, @floatFromInt(left_max)) - @as(f32, @floatFromInt(left_min))); // penalty for range of isovalues on left side
+    h += @abs(@as(f32, @floatFromInt(right_max)) - @as(f32, @floatFromInt(right_min))); // penalty for range of isovalues on right side
+
+    return h;
+}
+
+pub fn FlexibleCenterWeighted100(p: SPACESIZE, mid: SPACESIZE, st: SpaceTracker, axis: geo.Axis) f32 {
+    const halfs = st.node_space.splitGlobal(axis, p);
+
+    var left_iter = halfs[0].initIterator();
+    var right_iter = halfs[1].initIterator();
+
+    var left_max: SPACESIZE = 0;
+    var left_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    var right_max: SPACESIZE = 0;
+    var right_min: SPACESIZE = std.math.maxInt(SPACESIZE);
+
+    while (left_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        left_min = @min(left_min, cdr.min);
+        left_max = @max(left_max, cdr.max);
+    }
+
+    while (right_iter.next()) |c| {
+        const cdr = st.kdt.data.getCornerDensRange(c);
+        right_min = @min(right_min, cdr.min);
+        right_max = @max(right_max, cdr.max);
+    }
+
+    var h: f32 = 0;
+    h += @abs(@as(f32, @floatFromInt(p)) - @as(f32, @floatFromInt(mid))) * 100; // penalty for deviation from mid
+    h += @abs(@as(f32, @floatFromInt(left_max)) - @as(f32, @floatFromInt(left_min))); // penalty for range of isovalues on left side
+    h += @abs(@as(f32, @floatFromInt(right_max)) - @as(f32, @floatFromInt(right_min))); // penalty for range of isovalues on right side
+
+    return h;
 }
